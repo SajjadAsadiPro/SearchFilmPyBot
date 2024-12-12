@@ -2,6 +2,7 @@ from telegram import Update, Document
 from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, ContextTypes
 import openpyxl
 import os
+from dotenv import load_dotenv
 
 # ذخیره مسیر فایل اکسل
 EXCEL_FILE_PATH = "uploaded_data.xlsx"
@@ -25,7 +26,7 @@ async def receive_excel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("لطفاً فقط فایل اکسل با فرمت .xlsx ارسال کنید.")
 
-# تابع جستجو در اکسل
+# تابع جستجو در اکسل (فقط در "نام فارسی" و "نام انگلیسی")
 def search_in_excel(keyword):
     if not os.path.exists(EXCEL_FILE_PATH):
         return None
@@ -45,14 +46,23 @@ def search_in_excel(keyword):
     # لیست نتایج
     results = []
 
-    # جستجو در ردیف‌ها (از ردیف دوم به بعد)
+    # جستجو فقط در ستون‌های "نام فارسی" و "نام انگلیسی" (ردیف دوم به بعد)
     for row in sheet.iter_rows(min_row=2, values_only=True):
-        if any(keyword.lower() in str(cell).lower() for cell in row if cell):
+        # گرفتن مقادیر ستون‌های مورد نظر
+        name_farsi = row[headers["نام فارسی"]]
+        name_english = row[headers["نام انگلیسی"]]
+        link = row[headers["لینک در کانال"]]
+        
+        # بررسی کلمه کلیدی در این دو ستون
+        if (
+            keyword.lower() in str(name_farsi).lower() or
+            keyword.lower() in str(name_english).lower()
+        ):
             # گرفتن مقادیر از ستون‌های مشخص
             result = {
-                "نام فارسی": row[headers["نام فارسی"]],
-                "نام انگلیسی": row[headers["نام انگلیسی"]],
-                "لینک در کانال": row[headers["لینک در کانال"]],
+                "نام فارسی": name_farsi,
+                "نام انگلیسی": name_english,
+                "لینک در کانال": link
             }
             results.append(result)
 
@@ -72,19 +82,37 @@ async def search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif results:
         # ساختن متن خروجی
         output = "نتایج پیدا شده:\n"
-        for result in results:
+        for idx, result in enumerate(results, start=1):
             output += (
-                f"نام فارسی: {result['نام فارسی']}\n"
-                f"نام انگلیسی: {result['نام انگلیسی']}\n"
-                f"لینک در کانال: {result['لینک در کانال']}\n\n"
+                f"{idx} - : {result['نام فارسی']}\n"
+                f"<a href='{result['لینک در کانال']}'>{result['نام انگلیسی']}</a>\n\n"
             )
-        await update.message.reply_text(output, disable_web_page_preview=True)  # جلوگیری از پیش‌نمایش لینک
+
+        # تقسیم پیام‌ها اگر از 4096 کاراکتر بیشتر شد
+        messages = []
+        while len(output) > 4096:
+            split_index = output.rfind("\n", 0, 4096)  # پیدا کردن آخرین خط قبل از 4096
+            if split_index == -1:  # اگر خطی پیدا نشد، مجبوریم پیام را در نقطه‌ای ببریم
+                split_index = 4096
+            messages.append(output[:split_index])
+            output = output[split_index:]
+
+        # اضافه کردن پیام نهایی باقی‌مانده
+        if output:
+            messages.append(output)
+
+        # ارسال پیام‌ها به صورت جداگانه
+        for msg in messages:
+            await update.message.reply_text(
+                msg, parse_mode="HTML", disable_web_page_preview=True
+            )
     else:
         await update.message.reply_text("متاسفم! هیچ نتیجه‌ای پیدا نشد.")
 
 def main():
+    load_dotenv()
     # توکن ربات خود را جایگزین کنید
-    TOKEN = "7591891248:AAFmi_vGj3wm5icw6T4QSrBWiC6nTMonWIU"
+    TOKEN = os.getenv('TOKEN')
 
     # ایجاد اپلیکیشن
     application = ApplicationBuilder().token(TOKEN).build()
